@@ -1,49 +1,67 @@
-from flask import Flask, request, jsonify
-import google.generativeai as genai
 import os
+import requests
 import threading
+from flask import Flask, request, jsonify
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
+
+# Securely fetch API key from environment variables
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise ValueError("❌ Error: GEMINI_API_KEY is missing. Set it in Render.")
+
+# Set up Google Gemini API URL
+GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+
+# Initialize Flask app
 app = Flask(__name__)
 
-# ✅ Secure API Key (Store in Render Environment Variables)
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# Set up rate limiting (5 requests per 5 minutes per user)
+limiter = Limiter(
+    get_remote_address,  
+    app=app,  
+    default_limits=["5 per 5 minutes"]
+)
 
-# ✅ Initialize Gemini AI
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-else:
-    print("❌ ERROR: Gemini API Key is missing!")
+@app.route("/")
+def home():
+    return jsonify({"message": "✅ Gemini AI API is running!"})
 
-# ✅ Function to Generate Response from Gemini
-def get_gemini_response(user_question):
-    try:
-        model = genai.GenerativeModel("gemini-pro")
-        response = model.generate_content(user_question)
-        return response.text
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-# ✅ API Route for AI Doubt Solver
 @app.route("/ask", methods=["POST"])
-def ask_question():
+@limiter.limit("5 per 5 minutes")  # Enforce rate limiting
+def ask_gemini():
     try:
-        data = request.get_json()
-        question = data.get("question", "")
+        data = request.json
+        user_prompt = data.get("prompt")
 
-        if not question:
-            return jsonify({"error": "Missing question"}), 400
+        if not user_prompt:
+            return jsonify({"error": "❌ Please provide a prompt!"}), 400
 
-        # ✅ Use Threading for Fast Response
-        response = []
-        thread = threading.Thread(target=lambda: response.append(get_gemini_response(question)))
+        response_data = []
+
+        # Request to Gemini API (Run in a separate thread for better performance)
+        def fetch_response():
+            payload = {"contents": [{"parts": [{"text": user_prompt}]}]}
+            headers = {"Content-Type": "application/json"}
+
+            response = requests.post(GEMINI_API_URL, json=payload, headers=headers)
+            if response.status_code == 200:
+                response_data.append(response.json())
+            else:
+                response_data.append({"error": "❌ Failed to fetch response from Gemini API"})
+
+        thread = threading.Thread(target=fetch_response)
         thread.start()
         thread.join()
 
-        return jsonify({"response": response[0]})
+        return jsonify(response_data[0])
 
     except Exception as e:
-        return jsonify({"error": "Server error, please try again later"}), 500
+        return jsonify({"error": "❌ Server Error! Please try again later."}), 500
 
-# ✅ Run Flask App (For Local Testing)
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=10000)  # Use a non-default port for security
