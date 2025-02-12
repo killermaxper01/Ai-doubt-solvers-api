@@ -1,58 +1,49 @@
-import os
-import requests
 from flask import Flask, request, jsonify
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+import google.generativeai as genai
+import os
+import threading
 
 app = Flask(__name__)
 
-# Load secure environment variables from Render
-AUTH_SECRET = os.getenv("AUTH_SECRET")  # Security Key
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # Google Gemini API Key
+# ✅ Secure API Key (Store in Render Environment Variables)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Rate Limiting: Max 5 requests per hour per user
-limiter = Limiter(
-    get_remote_address,  # Identify users by IP
-    app=app,
-    default_limits=["5 per hour"]
-)
+# ✅ Initialize Gemini AI
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+else:
+    print("❌ ERROR: Gemini API Key is missing!")
 
-def ask_gemini(question):
-    """Send question to Google Gemini API and return the response."""
-    url = "https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateText"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "prompt": {"text": question},
-        "temperature": 0.7
-    }
+# ✅ Function to Generate Response from Gemini
+def get_gemini_response(user_question):
+    try:
+        model = genai.GenerativeModel("gemini-pro")
+        response = model.generate_content(user_question)
+        return response.text
+    except Exception as e:
+        return f"Error: {str(e)}"
 
-    response = requests.post(f"{url}?key={GEMINI_API_KEY}", json=payload, headers=headers)
-    
-    if response.status_code == 200:
-        return response.json().get("candidates", [{}])[0].get("output", "No response")
-    return "Error contacting AI"
-
-@app.route('/ask', methods=['POST'])
-@limiter.limit("5 per hour")  # Enforce Rate Limit
+# ✅ API Route for AI Doubt Solver
+@app.route("/ask", methods=["POST"])
 def ask_question():
-    """Process question and return AI-generated answer."""
-    auth_token = request.headers.get("Authorization")
-    if auth_token != AUTH_SECRET:
-        return jsonify({"error": "Unauthorized"}), 403
+    try:
+        data = request.get_json()
+        question = data.get("question", "")
 
-    data = request.get_json()
-    question = data.get("question", "")
+        if not question:
+            return jsonify({"error": "Missing question"}), 400
 
-    if not question:
-        return jsonify({"error": "No question provided"}), 400
+        # ✅ Use Threading for Fast Response
+        response = []
+        thread = threading.Thread(target=lambda: response.append(get_gemini_response(question)))
+        thread.start()
+        thread.join()
 
-    answer = ask_gemini(question)
-    return jsonify({"answer": answer})
+        return jsonify({"response": response[0]})
 
-@app.errorhandler(429)
-def ratelimit_handler(e):
-    """Handle rate limit errors."""
-    return jsonify({"error": "Rate limit exceeded. Try again in 1 hour."}), 429
+    except Exception as e:
+        return jsonify({"error": "Server error, please try again later"}), 500
 
+# ✅ Run Flask App (For Local Testing)
 if __name__ == "__main__":
-    app.run(debug=False, host="0.0.0.0", port=5000)
+    app.run(debug=True)
