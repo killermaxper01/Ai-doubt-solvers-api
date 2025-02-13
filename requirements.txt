@@ -1,5 +1,5 @@
-Flask
-Flask-Limiter
+flask
 requests
+flask-limiter
 python-dotenv
 gunicorn
