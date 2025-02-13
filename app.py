@@ -1,67 +1,64 @@
+from flask import Flask, request, jsonify
 import os
 import requests
-import threading
-from flask import Flask, request, jsonify
+from dotenv import load_dotenv
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from dotenv import load_dotenv
 
-# Load environment variables
+# Load environment variables from Render (.env)
 load_dotenv()
 
-# Securely fetch API key from environment variables
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise ValueError("❌ Error: GEMINI_API_KEY is missing. Set it in Render.")
-
-# Set up Google Gemini API URL
-GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-
-# Initialize Flask app
 app = Flask(__name__)
 
-# Set up rate limiting (5 requests per 5 minutes per user)
+# Secure API Key and Secret Token
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+SECRET_AUTH_TOKEN = os.getenv("SECRET_AUTH_TOKEN")  # Custom token for security
+
+if not GEMINI_API_KEY or not SECRET_AUTH_TOKEN:
+    raise ValueError("Missing API key or secret auth token in environment variables!")
+
+# Gemini API Endpoint
+API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+
+# ✅ Flask-Limiter for Rate Limiting (10 requests per hour per IP)
 limiter = Limiter(
     get_remote_address,  
-    app=app,  
-    default_limits=["5 per 5 minutes"]
+    app=app,
+    default_limits=["10 per hour"],  # ✅ Limits users to 10 AI queries per hour
+    storage_uri="memory://",  # ✅ Uses in-memory storage (reset every hour)
 )
 
-@app.route("/")
-def home():
-    return jsonify({"message": "✅ Gemini AI API is running!"})
+@app.route("/get_ai_answer", methods=["POST"])
+@limiter.limit("10 per hour")  # ✅ Apply limit to this route
+def get_ai_answer():
+    """Secure API endpoint for AI response with rate limiting"""
+    
+    # ✅ Check for secret token in headers
+    token = request.headers.get("Authorization")
+    if token != SECRET_AUTH_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 403  # Reject unauthorized requests
 
-@app.route("/ask", methods=["POST"])
-@limiter.limit("5 per 5 minutes")  # Enforce rate limiting
-def ask_gemini():
+    data = request.json
+    question = data.get("question")
+
+    if not question:
+        return jsonify({"error": "No question provided"}), 400
+
+    # Call Gemini AI API securely
     try:
-        data = request.json
-        user_prompt = data.get("prompt")
+        response = requests.post(API_URL, json={"contents": [{"parts": [{"text": question}]}]})
+        response_data = response.json()
+        answer = response_data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "No response from AI.")
 
-        if not user_prompt:
-            return jsonify({"error": "❌ Please provide a prompt!"}), 400
-
-        response_data = []
-
-        # Request to Gemini API (Run in a separate thread for better performance)
-        def fetch_response():
-            payload = {"contents": [{"parts": [{"text": user_prompt}]}]}
-            headers = {"Content-Type": "application/json"}
-
-            response = requests.post(GEMINI_API_URL, json=payload, headers=headers)
-            if response.status_code == 200:
-                response_data.append(response.json())
-            else:
-                response_data.append({"error": "❌ Failed to fetch response from Gemini API"})
-
-        thread = threading.Thread(target=fetch_response)
-        thread.start()
-        thread.join()
-
-        return jsonify(response_data[0])
+        return jsonify({"answer": answer})
 
     except Exception as e:
-        return jsonify({"error": "❌ Server Error! Please try again later."}), 500
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+# ✅ Custom Error Message for Rate Limit Exceeded
+@app.errorhandler(429)
+def ratelimit_exceeded(e):
+    return jsonify({"error": "Rate limit exceeded! You can only ask 10 questions per hour."}), 429
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)  # Use a non-default port for security
+    app.run(debug=True)
