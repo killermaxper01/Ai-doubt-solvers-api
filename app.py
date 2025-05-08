@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS  # NEW
 import os
 import requests
 from dotenv import load_dotenv
@@ -7,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app)  # ✅ This enables CORS for all routes
 
 # ✅ Load API Key and Secret Token from Environment Variables
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -20,12 +22,10 @@ API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-f
 
 @app.route("/", methods=["GET"])
 def home():
-    """Simple Welcome Page"""
     return jsonify({"message": "Welcome to AI Doubt Solvers API"}), 200
 
 @app.route("/get_ai_answer", methods=["POST"])
 def get_ai_answer():
-    """Secure API endpoint for AI response"""
     token = request.headers.get("Authorization")
 
     # ✅ Check Authorization
@@ -39,17 +39,16 @@ def get_ai_answer():
         return jsonify({"error": "No question provided"}), 400
 
     try:
-        # ✅ Call Gemini AI API
+        # ✅ Call Gemini API
         response = requests.post(API_URL, json={"contents": [{"parts": [{"text": question}]}]})
         response_data = response.json()
+
         answer = response_data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "No response from AI.")
 
         return jsonify({"answer": answer})
 
     except Exception as e:
-        # ✅ Robust error message
         return jsonify({"error": "It is a server-side problem, please be patient."}), 500
 
-# ✅ Deployment: Public access, threaded=True (for local tests)
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, threaded=True)
