@@ -16,7 +16,7 @@ if not GEMINI_API_KEY or not SECRET_AUTH_TOKEN:
     raise ValueError("❌ API Key or Secret Token is missing!")
 
 # ✅ Current, supported model (fast & capable as of Jan 2026)
-MODEL_NAME = "gemmma-3-1b-it"  # Try "gemini-2.5-flash" or "gemini-2.0-flash" if this gives issues
+MODEL_NAME = "gemma-3-1b-it"  # Try "gemini-2.5-flash" or "gemini-2.0-flash" if this gives issues
 
 API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={GEMINI_API_KEY}"
 
