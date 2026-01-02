@@ -18,7 +18,7 @@ if not GEMINI_API_KEY or not SECRET_AUTH_TOKEN:
     raise ValueError("❌ API Key or Secret Token is missing!")
 
 # ✅ Define Gemini API Endpoint
-API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemma-3-4b-it:generateContent?key={GEMINI_API_KEY}"
+API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemma-3-1b-it:generateContent?key={GEMINI_API_KEY}"
 
 @app.route("/", methods=["GET"])
 def home():
